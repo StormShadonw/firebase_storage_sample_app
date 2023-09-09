@@ -1,125 +1,447 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
+import 'dart:typed_data';
 
-void main() {
-  runApp(const MyApp());
+import 'package:docx_template/docx_template.dart';
+import 'package:file_saver/file_saver.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_storage_sample_app/firebase_options.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_excel/excel.dart';
+import 'package:intl/intl.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Flutter Demo',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a blue toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: MyHomePage(),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  final numberFormat = NumberFormat("#,##0.00", "en_US");
+  final storage = FirebaseStorage.instance;
+  final storageRef = FirebaseStorage.instance.ref();
+  bool _isLoading = false;
+  final excelForm = GlobalKey<FormState>();
+  final wordForm = GlobalKey<FormState>();
+  int indexToEdit = 0;
+  List<List<Data?>> dataExcel = [];
+  late Excel excelFile;
+  TextEditingController _name = TextEditingController();
+  TextEditingController _age = TextEditingController();
+  TextEditingController _client = TextEditingController();
+  TextEditingController _amount = TextEditingController();
 
-  void _incrementCounter() {
+  void edit(int index, String name, int age) {
+    indexToEdit = index;
+    _name.value = TextEditingValue(text: name);
+    _age.value = TextEditingValue(text: age.toString());
+  }
+
+  Future<void> deleteRow(int index) async {
+    excelFile.removeRow("Hoja1", index);
+    await uploadExcelFile();
+    await downloadFile();
+  }
+
+  int findArray(List<int> source, List<int> target) {
+    for (int i = 0; i <= source.length - target.length; i++) {
+      bool found = true;
+
+      for (int j = 0; j < target.length; j++) {
+        if (source[i + j] != target[j]) {
+          found = false;
+          break;
+        }
+      }
+
+      if (found) {
+        return i;
+      }
+    }
+
+    return -1; // Si no se encontró la coincidencia
+  }
+
+  Future<void> downloadWordFile() async {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _isLoading = true;
+    });
+    try {
+      if (wordForm.currentState!.validate()) {
+        final islandRef =
+            storageRef.child("flutter_invoice_template_sample.docx");
+        final Uint8List? data = await islandRef.getData();
+        var doc = await DocxTemplate.fromBytes(data as List<int>);
+        var monto = [133, 155, 157, 156, 164, 157, 135];
+
+        var content = Content();
+        content.add(TextContent("[cliente]", _client.value.text));
+        content.add(TextContent(
+            "[monto]", numberFormat.format(double.parse(_amount.value.text))));
+        var docGenerated = await doc.generate(content);
+        print(docGenerated);
+        print(monto);
+        print("Array!: ${findArray(docGenerated as List<int>, monto)}");
+        // final fileGenerated = File('generated.docx');
+        // if (docGenerated != null)
+        //   await fileGenerated.writeAsBytes(docGenerated,
+        //       flush: true, mode: FileMode.append);
+        // await FileSaver.instance.saveFile(
+        //     name: "Factura",
+        //     bytes: await fileGenerated.readAsBytes(),
+        //     ext: "docx");
+        _amount.value = TextEditingValue.empty;
+        _client.value = TextEditingValue.empty;
+      }
+    } catch (error) {
+      print("Error descargando archivo word: $error");
+    }
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  Future<void> downloadExcelFile() async {
+    setState(() {
+      _isLoading = true;
+    });
+    final islandRef = storageRef.child("Firebase_storage_sample_archive.xlsx");
+    final Uint8List? data = await islandRef.getData();
+    Excel.decodeBytes(data?.toList() as List<int>).save(fileName: "Data.xlsx");
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  Future<void> uploadExcelFile() async {
+    final mountainsRef =
+        storageRef.child("Firebase_storage_sample_archive.xlsx");
+    await mountainsRef.putData(excelFile.encode() as Uint8List);
+  }
+
+  Future<void> insert() async {
+    setState(() {
+      _isLoading = true;
+    });
+    try {
+      if (excelForm.currentState!.validate()) {
+        print("Index: $indexToEdit");
+        if (indexToEdit == 0) {
+          print(excelFile.tables["Hoja1"]?.maxRows);
+          excelFile.insertRowIterables(
+              "Hoja1",
+              [_name.value.text, int.parse(_age.value.text)],
+              (excelFile.tables["Hoja1"]?.maxRows as int));
+          await uploadExcelFile();
+        } else {
+          excelFile.updateCell(
+              "Hoja1",
+              CellIndex.indexByColumnRow(
+                  columnIndex: 0, rowIndex: indexToEdit - 1),
+              _name.value.text);
+          excelFile.updateCell(
+              "Hoja1",
+              CellIndex.indexByColumnRow(
+                  columnIndex: 1, rowIndex: indexToEdit - 1),
+              int.parse(_age.value.text));
+          await uploadExcelFile();
+        }
+
+        await downloadFile();
+        // excelFile.save(fileName: "Firebase_storage_sample_archive.xlsx");
+      }
+    } catch (error) {
+      print("Error escribiendo data: $error");
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  Future<void> downloadFile() async {
+    setState(() {
+      _isLoading = true;
+    });
+    try {
+      indexToEdit = 0;
+      _name.value = TextEditingValue.empty;
+      _age.value = TextEditingValue.empty;
+      final islandRef =
+          storageRef.child("Firebase_storage_sample_archive.xlsx");
+      const oneMegabyte = 1024 * 1024;
+      final Uint8List? data = await islandRef.getData();
+      excelFile = Excel.decodeBytes(data?.toList() as List<int>);
+      for (var table in excelFile.tables.keys) {
+        print(table); //sheet Name
+        print(excelFile.tables[table]?.maxCols);
+        print(excelFile.tables[table]?.maxRows);
+        var rows = excelFile.tables[table];
+        if (rows != null) {
+          var array = rows.rows;
+          array.removeAt(0);
+          setState(() {
+            dataExcel = array;
+          });
+        }
+      }
+    } catch (e) {
+      print("Error downloaded file: $e");
+    }
+
+    setState(() {
+      _isLoading = false;
     });
   }
 
   @override
+  void initState() {
+    super.initState();
+    downloadFile();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    var size = MediaQuery.of(context).size;
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text("Excel and word editing app"),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(),
+            )
+          : Container(
+              height: size.height,
+              width: size.width,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Container(
+                    width: size.width * 0.45,
+                    child: Column(
+                      children: [
+                        Container(
+                          margin: const EdgeInsets.symmetric(
+                            vertical: 15,
+                          ),
+                          child: Form(
+                            key: excelForm,
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: size.width * 0.45,
+                                  constraints: BoxConstraints(
+                                      maxHeight: size.height * 0.35),
+                                  child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceAround,
+                                      children: [
+                                        Container(
+                                          width: size.width * 0.15,
+                                          child: TextFormField(
+                                            controller: _name,
+                                            maxLength: 15,
+                                            validator: (value) {
+                                              if (value == null ||
+                                                  value.isEmpty) {
+                                                return "Debe de registrar un valor adecuado.";
+                                              }
+                                              return null;
+                                            },
+                                            decoration: const InputDecoration(
+                                                hintText: "Nombre"),
+                                          ),
+                                        ),
+                                        Container(
+                                          width: size.width * 0.15,
+                                          child: TextFormField(
+                                            keyboardType: TextInputType.number,
+                                            maxLength: 3,
+                                            controller: _age,
+                                            validator: (value) {
+                                              if (value == null ||
+                                                  value.isEmpty) {
+                                                return "Debe de registrar un valor adecuado.";
+                                              }
+                                              if (int.tryParse(value) == null) {
+                                                return "El valor debe de ser un numero";
+                                              }
+                                              return null;
+                                            },
+                                            decoration: const InputDecoration(
+                                                hintText: "Edad"),
+                                          ),
+                                        ),
+                                      ]),
+                                ),
+                                Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    vertical: 10,
+                                  ),
+                                  child: ElevatedButton.icon(
+                                      onPressed: insert,
+                                      icon: const Icon(Icons.save),
+                                      label: const Text(
+                                          "Guardar informacion en excel")),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Container(
+                          width: size.width,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                "Data Excel.",
+                                textAlign: TextAlign.left,
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              TextButton.icon(
+                                  onPressed: downloadExcelFile,
+                                  icon: const Icon(Icons.download),
+                                  label: const Text("Descargar data"))
+                            ],
+                          ),
+                        ),
+                        Divider(),
+                        Flexible(
+                          child: ListView.builder(
+                            itemBuilder: (context, index) => ListTile(
+                              title:
+                                  Text("Nombre: ${dataExcel[index][0]?.value}"),
+                              subtitle:
+                                  Text("Edad: ${dataExcel[index][1]?.value}"),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceAround,
+                                children: [
+                                  IconButton(
+                                    onPressed: () => edit(
+                                        index + 2,
+                                        dataExcel[index][0]?.value,
+                                        dataExcel[index][1]?.value),
+                                    icon: Icon(Icons.edit),
+                                    color: Colors.orangeAccent,
+                                  ),
+                                  IconButton(
+                                    onPressed: () => deleteRow(index + 1),
+                                    icon: Icon(Icons.delete),
+                                    color: Colors.redAccent,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            itemCount: dataExcel.length,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: size.width * 0.45,
+                    child: Column(
+                      children: [
+                        Container(
+                          margin: const EdgeInsets.symmetric(
+                            vertical: 15,
+                          ),
+                          child: Form(
+                            key: wordForm,
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: size.width * 0.45,
+                                  constraints: BoxConstraints(
+                                      maxHeight: size.height * 0.35),
+                                  child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          width: size.width * 0.45,
+                                          child: TextFormField(
+                                            controller: _client,
+                                            maxLength: 65,
+                                            validator: (value) {
+                                              if (value == null ||
+                                                  value.isEmpty) {
+                                                return "Debe de registrar un valor adecuado.";
+                                              }
+                                              return null;
+                                            },
+                                            decoration: const InputDecoration(
+                                                hintText: "Cliente"),
+                                          ),
+                                        ),
+                                        Container(
+                                          width: size.width * 0.45,
+                                          child: TextFormField(
+                                            keyboardType: TextInputType.number,
+                                            maxLength: 9,
+                                            controller: _amount,
+                                            validator: (value) {
+                                              if (value == null ||
+                                                  value.isEmpty) {
+                                                return "Debe de registrar un valor adecuado.";
+                                              }
+                                              if (double.tryParse(value) ==
+                                                  null) {
+                                                return "El valor debe de ser un numero";
+                                              }
+                                              return null;
+                                            },
+                                            decoration: const InputDecoration(
+                                                hintText: "Monto"),
+                                          ),
+                                        ),
+                                      ]),
+                                ),
+                                Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    vertical: 10,
+                                  ),
+                                  child: ElevatedButton.icon(
+                                    onPressed: downloadWordFile,
+                                    icon: const Icon(Icons.download),
+                                    label: const Text("Descargar factura"),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )),
     );
   }
 }
