@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -6,6 +7,7 @@ import 'package:file_saver/file_saver.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_storage_sample_app/firebase_options.dart';
+import 'package:firebase_storage_sample_app/helpers/ExcelHelper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_excel/excel.dart';
 import 'package:intl/intl.dart';
@@ -40,6 +42,8 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  final _fileName = "Firebase_storage_sample_archive.xlsx";
+  final _sheetName = "Hoja1";
   final numberFormat = NumberFormat("#,##0.00", "en_US");
   final storage = FirebaseStorage.instance;
   final storageRef = FirebaseStorage.instance.ref();
@@ -48,7 +52,7 @@ class _MyHomePageState extends State<MyHomePage> {
   final wordForm = GlobalKey<FormState>();
   int indexToEdit = 0;
   List<List<Data?>> dataExcel = [];
-  late Excel excelFile;
+  late ExcelHelper excelFile;
   TextEditingController _name = TextEditingController();
   TextEditingController _age = TextEditingController();
   TextEditingController _client = TextEditingController();
@@ -61,7 +65,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> deleteRow(int index) async {
-    excelFile.removeRow("Hoja1", index);
+    excelFile.deleteData(index);
     await uploadExcelFile();
     await downloadFile();
   }
@@ -94,25 +98,13 @@ class _MyHomePageState extends State<MyHomePage> {
         final islandRef =
             storageRef.child("flutter_invoice_template_sample.docx");
         final Uint8List? data = await islandRef.getData();
-        var doc = await DocxTemplate.fromBytes(data as List<int>);
-        var monto = [133, 155, 157, 156, 164, 157, 135];
+        var docx = await DocxTemplate.fromBytes(data as List<int>);
+        var word = await docx.generate(
+            Content("", {"[cliente]": TextContent("[cliente]", "Jorge")}));
+        print("Document wodr: ${word}");
+        await FileSaver.instance
+            .saveFile(name: "Factura", bytes: word as Uint8List?, ext: "docx");
 
-        var content = Content();
-        content.add(TextContent("[cliente]", _client.value.text));
-        content.add(TextContent(
-            "[monto]", numberFormat.format(double.parse(_amount.value.text))));
-        var docGenerated = await doc.generate(content);
-        print(docGenerated);
-        print(monto);
-        print("Array!: ${findArray(docGenerated as List<int>, monto)}");
-        // final fileGenerated = File('generated.docx');
-        // if (docGenerated != null)
-        //   await fileGenerated.writeAsBytes(docGenerated,
-        //       flush: true, mode: FileMode.append);
-        // await FileSaver.instance.saveFile(
-        //     name: "Factura",
-        //     bytes: await fileGenerated.readAsBytes(),
-        //     ext: "docx");
         _amount.value = TextEditingValue.empty;
         _client.value = TextEditingValue.empty;
       }
@@ -128,7 +120,7 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _isLoading = true;
     });
-    final islandRef = storageRef.child("Firebase_storage_sample_archive.xlsx");
+    final islandRef = storageRef.child(_fileName);
     final Uint8List? data = await islandRef.getData();
     Excel.decodeBytes(data?.toList() as List<int>).save(fileName: "Data.xlsx");
     setState(() {
@@ -137,9 +129,9 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> uploadExcelFile() async {
-    final mountainsRef =
-        storageRef.child("Firebase_storage_sample_archive.xlsx");
-    await mountainsRef.putData(excelFile.encode() as Uint8List);
+    final mountainsRef = storageRef.child(_fileName);
+
+    await mountainsRef.putData(excelFile.getBytes() as Uint8List);
   }
 
   Future<void> insert() async {
@@ -148,30 +140,25 @@ class _MyHomePageState extends State<MyHomePage> {
     });
     try {
       if (excelForm.currentState!.validate()) {
-        print("Index: $indexToEdit");
         if (indexToEdit == 0) {
-          print(excelFile.tables["Hoja1"]?.maxRows);
-          excelFile.insertRowIterables(
-              "Hoja1",
-              [_name.value.text, int.parse(_age.value.text)],
-              (excelFile.tables["Hoja1"]?.maxRows as int));
-          await uploadExcelFile();
+          excelFile.insertData(
+            [
+              _name.value.text,
+              int.parse(_age.value.text),
+            ],
+          );
         } else {
-          excelFile.updateCell(
-              "Hoja1",
-              CellIndex.indexByColumnRow(
-                  columnIndex: 0, rowIndex: indexToEdit - 1),
-              _name.value.text);
-          excelFile.updateCell(
-              "Hoja1",
-              CellIndex.indexByColumnRow(
-                  columnIndex: 1, rowIndex: indexToEdit - 1),
-              int.parse(_age.value.text));
-          await uploadExcelFile();
+          print("Indice: $indexToEdit");
+          excelFile.updateData(
+            indexToEdit - 1,
+            [
+              _name.value.text,
+              int.parse(_age.value.text),
+            ],
+          );
         }
-
+        await uploadExcelFile();
         await downloadFile();
-        // excelFile.save(fileName: "Firebase_storage_sample_archive.xlsx");
       }
     } catch (error) {
       print("Error escribiendo data: $error");
@@ -190,24 +177,13 @@ class _MyHomePageState extends State<MyHomePage> {
       indexToEdit = 0;
       _name.value = TextEditingValue.empty;
       _age.value = TextEditingValue.empty;
-      final islandRef =
-          storageRef.child("Firebase_storage_sample_archive.xlsx");
-      const oneMegabyte = 1024 * 1024;
+      final islandRef = storageRef.child(_fileName);
       final Uint8List? data = await islandRef.getData();
-      excelFile = Excel.decodeBytes(data?.toList() as List<int>);
-      for (var table in excelFile.tables.keys) {
-        print(table); //sheet Name
-        print(excelFile.tables[table]?.maxCols);
-        print(excelFile.tables[table]?.maxRows);
-        var rows = excelFile.tables[table];
-        if (rows != null) {
-          var array = rows.rows;
-          array.removeAt(0);
-          setState(() {
-            dataExcel = array;
-          });
-        }
-      }
+      excelFile =
+          ExcelHelper.init(dataInBytes: data as List<int>, sheet: _sheetName);
+      setState(() {
+        dataExcel = excelFile.getData();
+      });
     } catch (e) {
       print("Error downloaded file: $e");
     }
@@ -217,10 +193,22 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  Future<void> getInitData() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    downloadFile();
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    downloadFile();
+    getInitData();
   }
 
   @override
