@@ -2,21 +2,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:docx_template/docx_template.dart';
-import 'package:file_saver/file_saver.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:firebase_storage_sample_app/firebase_options.dart';
-import 'package:firebase_storage_sample_app/helpers/ExcelHelper.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_excel/excel.dart';
 import 'package:intl/intl.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
   runApp(MyApp());
 }
 
@@ -42,17 +33,16 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  final dio = Dio();
+  static const APISERVER = "https://localhost:7114";
   final _fileName = "Firebase_storage_sample_archive.xlsx";
   final _sheetName = "Hoja1";
   final numberFormat = NumberFormat("#,##0.00", "en_US");
-  final storage = FirebaseStorage.instance;
-  final storageRef = FirebaseStorage.instance.ref();
   bool _isLoading = false;
   final excelForm = GlobalKey<FormState>();
   final wordForm = GlobalKey<FormState>();
   int indexToEdit = 0;
-  List<List<Data?>> dataExcel = [];
-  late ExcelHelper excelFile;
+  List<dynamic> dataExcel = [];
   TextEditingController _name = TextEditingController();
   TextEditingController _age = TextEditingController();
   TextEditingController _client = TextEditingController();
@@ -65,28 +55,27 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> deleteRow(int index) async {
-    excelFile.deleteData(index);
-    await uploadExcelFile();
-    await downloadFile();
+    final response = await dio.delete('$APISERVER/Excel/$index');
+    print(response);
+    await getData();
   }
 
-  int findArray(List<int> source, List<int> target) {
-    for (int i = 0; i <= source.length - target.length; i++) {
-      bool found = true;
-
-      for (int j = 0; j < target.length; j++) {
-        if (source[i + j] != target[j]) {
-          found = false;
-          break;
-        }
-      }
-
-      if (found) {
-        return i;
-      }
-    }
-
-    return -1; // Si no se encontró la coincidencia
+  Future<void> getData() async {
+    setState(() {
+      _isLoading = true;
+    });
+    final response = await dio.get('$APISERVER/Excel');
+    print("Response: $response");
+    var data = response.data as List<dynamic>;
+    data = data.removeAt(0);
+    print("Data: $data");
+    setState(() {
+      dataExcel.addAll(data);
+    });
+    print("Response: $response");
+    setState(() {
+      _isLoading = false;
+    });
   }
 
   Future<void> downloadWordFile() async {
@@ -95,16 +84,12 @@ class _MyHomePageState extends State<MyHomePage> {
     });
     try {
       if (wordForm.currentState!.validate()) {
-        final islandRef =
-            storageRef.child("flutter_invoice_template_sample.docx");
-        final Uint8List? data = await islandRef.getData();
-        var docx = await DocxTemplate.fromBytes(data as List<int>);
-        var word = await docx.generate(
-            Content("", {"[cliente]": TextContent("[cliente]", "Jorge")}));
-        print("Document wodr: ${word}");
-        await FileSaver.instance
-            .saveFile(name: "Factura", bytes: word as Uint8List?, ext: "docx");
-
+        var response = await dio.post('$APISERVER/Word', data: {
+          'customer': _client.value.text,
+          'supplier': 'Emanuel',
+          'amount': double.parse(_amount.value.text),
+        });
+        print("Document wodr: ${response}");
         _amount.value = TextEditingValue.empty;
         _client.value = TextEditingValue.empty;
       }
@@ -120,18 +105,12 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _isLoading = true;
     });
-    final islandRef = storageRef.child(_fileName);
-    final Uint8List? data = await islandRef.getData();
-    Excel.decodeBytes(data?.toList() as List<int>).save(fileName: "Data.xlsx");
+    var response = await dio.get(
+      '$APISERVER/Excel/download-file',
+    );
     setState(() {
       _isLoading = false;
     });
-  }
-
-  Future<void> uploadExcelFile() async {
-    final mountainsRef = storageRef.child(_fileName);
-
-    await mountainsRef.putData(excelFile.getBytes() as Uint8List);
   }
 
   Future<void> insert() async {
@@ -141,24 +120,23 @@ class _MyHomePageState extends State<MyHomePage> {
     try {
       if (excelForm.currentState!.validate()) {
         if (indexToEdit == 0) {
-          excelFile.insertData(
-            [
-              _name.value.text,
-              int.parse(_age.value.text),
-            ],
-          );
+          var response = await dio.post('$APISERVER/Excel', data: {
+            'name': _name.value.text,
+            'age': int.parse(_age.value.text)
+          });
+          if (response.statusCode == 200) {
+            await downloadFile();
+          }
         } else {
           print("Indice: $indexToEdit");
-          excelFile.updateData(
-            indexToEdit - 1,
-            [
-              _name.value.text,
-              int.parse(_age.value.text),
-            ],
-          );
+          var response = await dio.put('$APISERVER/Excel/$indexToEdit', data: {
+            'name': _name.value.text,
+            'age': int.parse(_age.value.text)
+          });
+          if (response.statusCode == 200) {
+            await downloadFile();
+          }
         }
-        await uploadExcelFile();
-        await downloadFile();
       }
     } catch (error) {
       print("Error escribiendo data: $error");
@@ -177,12 +155,11 @@ class _MyHomePageState extends State<MyHomePage> {
       indexToEdit = 0;
       _name.value = TextEditingValue.empty;
       _age.value = TextEditingValue.empty;
-      final islandRef = storageRef.child(_fileName);
-      final Uint8List? data = await islandRef.getData();
-      excelFile =
-          ExcelHelper.init(dataInBytes: data as List<int>, sheet: _sheetName);
+      var response = await dio.get(
+        '$APISERVER/Excel',
+      );
       setState(() {
-        dataExcel = excelFile.getData();
+        dataExcel = response.data;
       });
     } catch (e) {
       print("Error downloaded file: $e");
@@ -194,15 +171,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> getInitData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    downloadFile();
-
-    setState(() {
-      _isLoading = false;
-    });
+    await getData();
+    await downloadFile();
   }
 
   @override
@@ -322,10 +292,8 @@ class _MyHomePageState extends State<MyHomePage> {
                         Flexible(
                           child: ListView.builder(
                             itemBuilder: (context, index) => ListTile(
-                              title:
-                                  Text("Nombre: ${dataExcel[index][0]?.value}"),
-                              subtitle:
-                                  Text("Edad: ${dataExcel[index][1]?.value}"),
+                              title: Text("Nombre: ${dataExcel[index][0]}"),
+                              subtitle: Text("Edad: ${dataExcel[index][1]}"),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment:
