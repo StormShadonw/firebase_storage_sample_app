@@ -1,8 +1,5 @@
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:dio/dio.dart';
+import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -36,17 +33,16 @@ class _MyHomePageState extends State<MyHomePage> {
   final dio = Dio();
   static const APISERVER = "https://localhost:7114";
   final _fileName = "Firebase_storage_sample_archive.xlsx";
-  final _sheetName = "Hoja1";
   final numberFormat = NumberFormat("#,##0.00", "en_US");
   bool _isLoading = false;
   final excelForm = GlobalKey<FormState>();
   final wordForm = GlobalKey<FormState>();
   int indexToEdit = 0;
   List<dynamic> dataExcel = [];
-  TextEditingController _name = TextEditingController();
-  TextEditingController _age = TextEditingController();
-  TextEditingController _client = TextEditingController();
-  TextEditingController _amount = TextEditingController();
+  final TextEditingController _name = TextEditingController();
+  final TextEditingController _age = TextEditingController();
+  final TextEditingController _client = TextEditingController();
+  final TextEditingController _amount = TextEditingController();
 
   void edit(int index, String name, int age) {
     indexToEdit = index;
@@ -55,27 +51,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> deleteRow(int index) async {
-    final response = await dio.delete('$APISERVER/Excel/$index');
-    print(response);
-    await getData();
-  }
-
-  Future<void> getData() async {
-    setState(() {
-      _isLoading = true;
-    });
-    final response = await dio.get('$APISERVER/Excel');
-    print("Response: $response");
-    var data = response.data as List<dynamic>;
-    data = data.removeAt(0);
-    print("Data: $data");
-    setState(() {
-      dataExcel.addAll(data);
-    });
-    print("Response: $response");
-    setState(() {
-      _isLoading = false;
-    });
+    await dio.delete('$APISERVER/Excel/$index');
+    await getExcelData();
   }
 
   Future<void> downloadWordFile() async {
@@ -84,18 +61,23 @@ class _MyHomePageState extends State<MyHomePage> {
     });
     try {
       if (wordForm.currentState!.validate()) {
-        var response = await dio.post('$APISERVER/Word', data: {
-          'customer': _client.value.text,
-          'supplier': 'Emanuel',
-          'amount': double.parse(_amount.value.text),
-        });
-        print("Document wodr: ${response}");
-        _amount.value = TextEditingValue.empty;
+        var dio = Dio();
+        var response = await dio.post(
+          '$APISERVER/Word',
+          options: Options(responseType: ResponseType.bytes),
+          data: {
+            "customer": _client.value.text,
+            "supplier": "Proveedor de prueba",
+            "amount": double.parse(_amount.value.text)
+          },
+        );
+        final responseBody = response.data;
+        FileSaver.instance.saveFile(name: "Factura.docx", bytes: responseBody);
         _client.value = TextEditingValue.empty;
+        _amount.value = TextEditingValue.empty;
       }
-    } catch (error) {
-      print("Error descargando archivo word: $error");
-    }
+    } catch (error) {}
+
     setState(() {
       _isLoading = false;
     });
@@ -105,9 +87,14 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _isLoading = true;
     });
+    var dio = Dio();
     var response = await dio.get(
       '$APISERVER/Excel/download-file',
+      options: Options(responseType: ResponseType.bytes),
     );
+    final responseBody = response.data;
+    FileSaver.instance.saveFile(name: _fileName, bytes: responseBody);
+
     setState(() {
       _isLoading = false;
     });
@@ -125,16 +112,15 @@ class _MyHomePageState extends State<MyHomePage> {
             'age': int.parse(_age.value.text)
           });
           if (response.statusCode == 200) {
-            await downloadFile();
+            await getExcelData();
           }
         } else {
-          print("Indice: $indexToEdit");
           var response = await dio.put('$APISERVER/Excel/$indexToEdit', data: {
             'name': _name.value.text,
             'age': int.parse(_age.value.text)
           });
           if (response.statusCode == 200) {
-            await downloadFile();
+            await getExcelData();
           }
         }
       }
@@ -147,7 +133,7 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  Future<void> downloadFile() async {
+  Future<void> getExcelData() async {
     setState(() {
       _isLoading = true;
     });
@@ -155,12 +141,34 @@ class _MyHomePageState extends State<MyHomePage> {
       indexToEdit = 0;
       _name.value = TextEditingValue.empty;
       _age.value = TextEditingValue.empty;
-      var response = await dio.get(
+      var response = await dio
+          .get(
         '$APISERVER/Excel',
-      );
-      setState(() {
-        dataExcel = response.data;
+      )
+          .onError((error, stackTrace) async {
+        return await showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+                  title: const Text("Error obteniendo data del excel"),
+                  content: Text(error.toString()),
+                ));
+      }).catchError((error) async {
+        return await showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+                  title: const Text("Error obteniendo data del excel"),
+                  content: Text(error.toString()),
+                ));
       });
+      var data = response.data as List<dynamic>;
+      data.removeAt(0);
+      if (response.statusCode == 200) {
+        setState(() {
+          dataExcel = data;
+        });
+      } else {
+        print("Error: ${response.statusMessage}");
+      }
     } catch (e) {
       print("Error downloaded file: $e");
     }
@@ -171,8 +179,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> getInitData() async {
-    await getData();
-    await downloadFile();
+    await getExcelData();
   }
 
   @override
@@ -302,13 +309,13 @@ class _MyHomePageState extends State<MyHomePage> {
                                   IconButton(
                                     onPressed: () => edit(
                                         index + 2,
-                                        dataExcel[index][0]?.value,
-                                        dataExcel[index][1]?.value),
+                                        dataExcel[index][0],
+                                        dataExcel[index][1]),
                                     icon: Icon(Icons.edit),
                                     color: Colors.orangeAccent,
                                   ),
                                   IconButton(
-                                    onPressed: () => deleteRow(index + 1),
+                                    onPressed: () => deleteRow(index + 2),
                                     icon: Icon(Icons.delete),
                                     color: Colors.redAccent,
                                   ),
