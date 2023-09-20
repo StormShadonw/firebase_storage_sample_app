@@ -33,6 +33,7 @@ class _MyHomePageState extends State<MyHomePage> {
   final dio = Dio();
   static const APISERVER = "https://localhost:7114";
   final _fileName = "Firebase_storage_sample_archive.xlsx";
+  final queryParameters = "documentId=Data.xlsx";
   final numberFormat = NumberFormat("#,##0.00", "en_US");
   bool _isLoading = false;
   final excelForm = GlobalKey<FormState>();
@@ -51,7 +52,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> deleteRow(int index) async {
-    await dio.delete('$APISERVER/Excel/$index');
+    await dio.delete('$APISERVER/Excel/$index?$queryParameters');
     await getExcelData();
   }
 
@@ -63,7 +64,7 @@ class _MyHomePageState extends State<MyHomePage> {
       if (wordForm.currentState!.validate()) {
         var dio = Dio();
         var response = await dio.post(
-          '$APISERVER/Word',
+          '$APISERVER/Word?documentId=Document.docx',
           options: Options(responseType: ResponseType.bytes),
           data: {
             "customer": _client.value.text,
@@ -89,7 +90,7 @@ class _MyHomePageState extends State<MyHomePage> {
     });
     var dio = Dio();
     var response = await dio.get(
-      '$APISERVER/Excel/download-file',
+      '$APISERVER/Excel/download-file?$queryParameters',
       options: Options(responseType: ResponseType.bytes),
     );
     final responseBody = response.data;
@@ -107,15 +108,17 @@ class _MyHomePageState extends State<MyHomePage> {
     try {
       if (excelForm.currentState!.validate()) {
         if (indexToEdit == 0) {
-          var response = await dio.post('$APISERVER/Excel', data: {
-            'name': _name.value.text,
-            'age': int.parse(_age.value.text)
-          });
+          var response = await dio.post('$APISERVER/Excel?$queryParameters',
+              data: {
+                'name': _name.value.text,
+                'age': int.parse(_age.value.text)
+              });
           if (response.statusCode == 200) {
             await getExcelData();
           }
         } else {
-          var response = await dio.put('$APISERVER/Excel/$indexToEdit', data: {
+          var response = await dio
+              .put('$APISERVER/Excel/$indexToEdit?$queryParameters', data: {
             'name': _name.value.text,
             'age': int.parse(_age.value.text)
           });
@@ -143,7 +146,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _age.value = TextEditingValue.empty;
       var response = await dio
           .get(
-        '$APISERVER/Excel',
+        '$APISERVER/Excel?$queryParameters',
       )
           .onError((error, stackTrace) async {
         return await showDialog(
