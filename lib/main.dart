@@ -31,7 +31,7 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   final dio = Dio();
-  static const APISERVER = "https://localhost:7114";
+  static const APISERVER = "https://riascoswebapi.azurewebsites.net";
   final _fileName = "Firebase_storage_sample_archive.xlsx";
   final queryParameters = "documentId=Data.xlsx";
   final numberFormat = NumberFormat("#,##0.00", "en_US");
