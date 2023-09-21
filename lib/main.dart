@@ -144,6 +144,12 @@ class _MyHomePageState extends State<MyHomePage> {
       indexToEdit = 0;
       _name.value = TextEditingValue.empty;
       _age.value = TextEditingValue.empty;
+      var dio = Dio();
+      dio.options.headers["Access-Control-Allow-Origin"] = "*";
+      dio.options.headers["Access-Control-Allow-Methods"] =
+          "GET,PUT,PATCH,POST,DELETE";
+      dio.options.headers["Access-Control-Allow-Headers"] =
+          "Origin, X-Requested-With, Content-Type, Accept";
       var response = await dio
           .get(
         '$APISERVER/Excel?$queryParameters',
