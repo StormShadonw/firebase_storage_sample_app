@@ -30,7 +30,6 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final dio = Dio();
   static const APISERVER = "https://riascoswebapi.azurewebsites.net";
   final _fileName = "Firebase_storage_sample_archive.xlsx";
   final queryParameters = "documentId=Data.xlsx";
@@ -52,6 +51,12 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> deleteRow(int index) async {
+    var dio = Dio();
+    dio.options.headers["Access-Control-Allow-Origin"] = "*";
+    dio.options.headers["Access-Control-Allow-Methods"] =
+        "GET,PUT,PATCH,POST,DELETE";
+    dio.options.headers["Access-Control-Allow-Headers"] =
+        "Origin, X-Requested-With, Content-Type, Accept";
     await dio.delete('$APISERVER/Excel/$index?$queryParameters');
     await getExcelData();
   }
@@ -89,6 +94,11 @@ class _MyHomePageState extends State<MyHomePage> {
       _isLoading = true;
     });
     var dio = Dio();
+    dio.options.headers["Access-Control-Allow-Origin"] = "*";
+    dio.options.headers["Access-Control-Allow-Methods"] =
+        "GET,PUT,PATCH,POST,DELETE";
+    dio.options.headers["Access-Control-Allow-Headers"] =
+        "Origin, X-Requested-With, Content-Type, Accept";
     var response = await dio.get(
       '$APISERVER/Excel/download-file?$queryParameters',
       options: Options(responseType: ResponseType.bytes),
@@ -107,6 +117,12 @@ class _MyHomePageState extends State<MyHomePage> {
     });
     try {
       if (excelForm.currentState!.validate()) {
+        var dio = Dio();
+        dio.options.headers["Access-Control-Allow-Origin"] = "*";
+        dio.options.headers["Access-Control-Allow-Methods"] =
+            "GET,PUT,PATCH,POST,DELETE";
+        dio.options.headers["Access-Control-Allow-Headers"] =
+            "Origin, X-Requested-With, Content-Type, Accept";
         if (indexToEdit == 0) {
           var response = await dio.post('$APISERVER/Excel?$queryParameters',
               data: {
